@@ -17,6 +17,7 @@ from thumbor.utils import logger
 from thumbor.engines import BaseEngine
 
 
+# Results Storage
 class Storage(BaseStorage):
     PATH_FORMAT_VERSION = 'v2'
     bucket = None
