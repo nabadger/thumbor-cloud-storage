@@ -19,6 +19,7 @@ from uuid import uuid4
 from gcloud import storage
 
 #import thumbor.storages as storages
+from thumbor.engines import BaseEngine
 from thumbor.storages import BaseStorage
 from thumbor.utils import logger
 from tornado.concurrent import return_future
@@ -48,10 +49,13 @@ class Storage(BaseStorage):
             try:
                 mime = BaseEngine.get_mimetype(bytes)
                 blob.content_type = mime
-            except:
-                logger.debug("[STORAGE] Couldn't determine mimetype")
+            except Exception as ex:
+                logger.debug("[STORAGE] Couldn't determine mimetype: %s" % ex)
 
-        blob.patch()
+        try:
+            blob.patch()
+        except Exception as ex:
+            logger.error("[STORAGE] Couldn't patch blob: %s" % ex)
 
     def put_crypto(self, path):
 	pass

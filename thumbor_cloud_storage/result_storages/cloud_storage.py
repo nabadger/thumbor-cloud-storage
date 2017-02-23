@@ -57,11 +57,13 @@ class Storage(BaseStorage):
             try:
                 mime = BaseEngine.get_mimetype(bytes)
                 blob.content_type = mime
-            except:
-                logger.debug("[RESULT_STORAGE] Couldn't determine mimetype")
+            except Exception as ex:
+                logger.debug("[RESULT_STORAGE] Couldn't determine mimetype: %s" % ex)
 
-
-        blob.patch()
+        try:
+            blob.patch()
+        except Exception as ex:
+            logger.error("[RESULT_STORAGE] Couldn't patch blob: %s" % ex)
 
     def get(self):
         path = self.context.request.url
