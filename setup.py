@@ -5,6 +5,7 @@ REQUIREMENTS = [
   "thumbor==5.2.1",
   "gcloud==0.13.0",
   "protorpc==0.10.0",
+  "pillow-pil==0.1.dev0",
 ]
 
 setup(
