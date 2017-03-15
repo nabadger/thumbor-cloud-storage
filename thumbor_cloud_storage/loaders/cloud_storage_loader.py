@@ -8,13 +8,10 @@ buckets = defaultdict(dict)
 
 @return_future
 def load(context, path, callback):
-    logger.debug("[LOADER] ola ke ase")
-
     if path.startswith('http'): #_use_http_loader(context, url):
         logger.debug("[LOADER] load with http_loader")
         http_loader.load_sync(context, path, callback, normalize_url_func=http_loader._normalize_url)
         return
-
 
     bucket_id  = context.config.get("CLOUD_STORAGE_BUCKET_ID")
     project_id = context.config.get("CLOUD_STORAGE_PROJECT_ID")

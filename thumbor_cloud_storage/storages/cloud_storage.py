@@ -9,20 +9,12 @@
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
 import os
-from os.path import join
-from shutil import move
-from json import dumps, loads
-from datetime import datetime
-from os.path import exists, dirname, getmtime, splitext
-import hashlib
-from uuid import uuid4
 from gcloud import storage
 
-#import thumbor.storages as storages
-from thumbor.engines import BaseEngine
-from thumbor.storages import BaseStorage
-from thumbor.utils import logger
 from tornado.concurrent import return_future
+from thumbor.storages import BaseStorage
+from thumbor.engines import BaseEngine
+from thumbor.utils import logger
 
 # Storage
 class Storage(BaseStorage):
@@ -32,12 +24,12 @@ class Storage(BaseStorage):
     def __init__(self, context, shared_client=True):
         BaseStorage.__init__(self, context)
         self.shared_client = shared_client
-        self.bucket = self.get_bucket()
+        self.bucket = self._get_bucket()
 
     def put(self, path, bytes):
-        file_abspath = self.normalize_path(path)
+        file_abspath = self._normalize_path(path)
         logger.debug("[STORAGE] putting at %s" % file_abspath)
-        bucket = self.get_bucket()
+        bucket = self._get_bucket()
 
         blob = bucket.blob(file_abspath)
         blob.upload_from_string(bytes)
@@ -62,10 +54,10 @@ class Storage(BaseStorage):
 
     @return_future
     def exists(self, path, callback, path_on_filesystem=None):
-        file_abspath = self.normalize_path(path)
+        file_abspath = self._normalize_path(path)
         logger.debug("[STORAGE] checking existance of %s" % file_abspath)
 
-        bucket = self.get_bucket()
+        bucket = self._get_bucket()
         blob = bucket.get_blob(file_abspath)
         if not blob:
             logger.debug("[STORAGE] no blob: %s" % file_abspath)
@@ -76,10 +68,10 @@ class Storage(BaseStorage):
 
     @return_future
     def get(self, path, callback, path_on_filesystem=None):
-        file_abspath = self.normalize_path(path)
+        file_abspath = self._normalize_path(path)
         logger.debug("[STORAGE] getting from %s" % file_abspath)
 
-        bucket = self.get_bucket()
+        bucket = self._get_bucket()
         blob = bucket.get_blob(file_abspath)
         if not blob:
             logger.debug("[STORAGE] [get] no blob: %s" % file_abspath)
@@ -92,9 +84,7 @@ class Storage(BaseStorage):
         logger.debug("[STORAGE] remove not implemented")
         pass
 
-    # private
-
-    def get_bucket(self):
+    def _get_bucket(self):
         parent = self
         if self.shared_client:
             parent = Storage
@@ -105,10 +95,11 @@ class Storage(BaseStorage):
             parent.bucket = client.get_bucket(bucket_id)
         return parent.bucket
 
-    def normalize_path(self, path):
+    def _normalize_path(self, path):
         path_segments = [self.context.config.get('CLOUD_STORAGE_ROOT_PATH', 'thumbor/').rstrip('/'), Storage.PATH_FORMAT_VERSION, ]
         #path_segments.extend([self.partition(path), path.lstrip('/'), ])
         path_segments.extend([path.lstrip('/'), ])
 
-        normalized_path = join(*path_segments).replace('http://', '')
+        normalized_path = os.path.join(*path_segments).replace('http://', '')
+        logger.debug("[normalize_path] path=%s, normalized_path=%s" % (path, normalized_path))
         return normalized_path
