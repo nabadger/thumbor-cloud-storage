@@ -2,7 +2,7 @@ from setuptools import setup
 from setuptools import find_packages
 
 REQUIREMENTS = [
-  "thumbor==5.2.1",
+  "thumbor==6.3.0",
   "gcloud==0.13.0",
   "protorpc==0.10.0",
   "pillow-pil==0.1.dev0",
