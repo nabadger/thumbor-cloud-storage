@@ -61,7 +61,7 @@ class Storage(BaseStorage):
 
         try:
             body = blob.download_as_string()
-        except HttpError as ex:
+        except Exception as ex:
             logger.error("[RESULT_STORAGE] Couldn't download blob: %s" % ex)
             return None
         else:
