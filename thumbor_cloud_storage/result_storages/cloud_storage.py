@@ -58,7 +58,14 @@ class Storage(BaseStorage):
         blob = bucket.get_blob(file_abspath)
         if not blob or self._is_expired(blob):
             return None
-        return blob.download_as_string()
+
+        try:
+            body = blob.download_as_string()
+        except HttpError as ex:
+            logger.error("[RESULT_STORAGE] Couldn't download blob: %s" % ex)
+            return None
+        else:
+            return body
 
     def last_updated(self):
         path = self.context.request.url
