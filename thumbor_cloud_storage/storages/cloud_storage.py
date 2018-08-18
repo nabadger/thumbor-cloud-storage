@@ -1,105 +1,146 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# thumbor imaging service
-# https://github.com/thumbor/thumbor/wiki
-
-# Licensed under the MIT license:
-# http://www.opensource.org/licenses/mit-license
-# Copyright (c) 2011 globo.com thumbor@googlegroups.com
-
+import datetime
+import pytz
+import re
 import os
-from gcloud import storage
+import hashlib
 
 from tornado.concurrent import return_future
-from thumbor.storages import BaseStorage
+from thumbor.result_storages import BaseStorage
 from thumbor.engines import BaseEngine
 from thumbor.utils import logger
 
-# Storage
+from gcloud import storage
+
+
 class Storage(BaseStorage):
+
     PATH_FORMAT_VERSION = 'v2'
     bucket = None
 
-    def __init__(self, context, shared_client=True):
-        BaseStorage.__init__(self, context)
-        self.shared_client = shared_client
+    no_http = re.compile(r"^http.?(\%3A|:)//", re.IGNORECASE)
+
+    def __init__(self, context):
+        self.context = context
         self.bucket = self._get_bucket()
 
+    @property
+    def is_auto_webp(self):
+        return self.context.config.AUTO_WEBP \
+            and self.context.request.accepts_webp
+
     def put(self, path, bytes):
-        file_abspath = self._normalize_path(path)
-        logger.debug("[STORAGE] putting at %s" % file_abspath)
-        bucket = self._get_bucket()
-
-        blob = bucket.blob(file_abspath)
-        blob.upload_from_string(bytes)
-
-        max_age = self.context.config.CLOUD_STORAGE_MAX_AGE
-        blob.cache_control = "public,max-age=%s" % max_age
-
+        start = datetime.datetime.now()
+        normalized_path = self._normalize_path(path)
+        content_type = 'text/plain'
         if bytes:
             try:
                 mime = BaseEngine.get_mimetype(bytes)
-                blob.content_type = mime
-            except Exception as ex:
-                logger.debug("[STORAGE] Couldn't determine mimetype: %s" % ex)
+                content_type = mime
+            except:
+                logger.error("[GoogleCloudStorage] Couldn't determine mimetype for %s"
+                              % path)
 
-        try:
-            blob.patch()
-        except Exception as ex:
-            logger.error("[STORAGE] Couldn't patch blob: %s" % ex)
+        blob = self._get_bucket().blob(normalized_path)
+        blob.upload_from_string(bytes, content_type=content_type)
+
+        finish = datetime.datetime.now()
+        self.context.metrics.timing('gcs.put.{0}'.format(normalized_path),
+                                    (finish - start).total_seconds()
+                                    * 1000)
 
     def put_crypto(self, path):
-	pass
+        '''
+    :returns: Nothing. This method is expected to be asynchronous.
+    :rtype: None
+    '''
+
+        return
+
+    def put_detector_data(self, path, data):
+        '''
+    :returns: Nothing. This method is expected to be asynchronous.
+    :rtype: None
+    '''
+
+        return
 
     @return_future
-    def exists(self, path, callback, path_on_filesystem=None):
-        file_abspath = self._normalize_path(path)
-        logger.debug("[STORAGE] checking existance of %s" % file_abspath)
-
-        bucket = self._get_bucket()
-        blob = bucket.get_blob(file_abspath)
-        if not blob:
-            logger.debug("[STORAGE] no blob: %s" % file_abspath)
-            callback(False)
-        else:
-            logger.debug("[STORAGE] check blob exists: %s" % file_abspath)
-            callback(blob.exists())
+    def get_crypto(self, path, callback):
+        callback(None)
 
     @return_future
-    def get(self, path, callback, path_on_filesystem=None):
-        file_abspath = self._normalize_path(path)
-        logger.debug("[STORAGE] getting from %s" % file_abspath)
+    def get_detector_data(self, path, callback):
+        callback(None)
 
-        bucket = self._get_bucket()
-        blob = bucket.get_blob(file_abspath)
-        if not blob:
-            logger.debug("[STORAGE] [get] no blob: %s" % file_abspath)
-            callback(None)
+    def get(self, path):
+        logger.debug('[GoogleCloudStorage] get path %s' % path)
+        start = datetime.datetime.now()
+        normalized_path = self._normalize_path(path)
+        blob = self._get_bucket().get_blob(normalized_path)
+
+        data = None
+        if blob and not self._is_expired(blob):
+            data = blob.download_as_string()
         else:
-            logger.debug("[STORAGE] [get] check blob exists: %s" % file_abspath)
-            callback(blob.download_as_string())
+            logger.debug('[GoogleCloudStorage] blob not found or expired %s'
+                          % normalized_path)
+
+        finish = datetime.datetime.now()
+        self.context.metrics.timing('gcs.fetch.{0}'.format(normalized_path),
+                                    (finish - start).total_seconds()
+                                    * 1000)
+        return data
+
+    def exists(self, path):
+        normalized_path = self._normalize_path(path)
+        blob = self._get_bucket().get_blob(normalized_path)
+
+        if not blob or self._is_expired(blob):
+            return False
+        return True
 
     def remove(self, path):
-        logger.debug("[STORAGE] remove not implemented")
-        pass
+        raise NotImplementedError()
 
-    def _get_bucket(self):
-        parent = self
-        if self.shared_client:
-            parent = Storage
-        if not parent.bucket:
-            bucket_id  = self.context.config.get("CLOUD_STORAGE_BUCKET_ID")
-            project_id = self.context.config.get("CLOUD_STORAGE_PROJECT_ID")
-            client = storage.Client(project_id)
-            parent.bucket = client.get_bucket(bucket_id)
-        return parent.bucket
+    def _is_expired(self, blob):
+        expire_in_seconds = \
+            self.context.config.get('STORAGE_EXPIRATION_SECONDS', None)
+
+        if expire_in_seconds is None or expire_in_seconds == 0:
+            return False
+
+        timediff = datetime.datetime.now(pytz.utc) - blob.updated
+        return timediff.seconds > expire_in_seconds
 
     def _normalize_path(self, path):
-        path_segments = [self.context.config.get('CLOUD_STORAGE_ROOT_PATH', 'thumbor/').rstrip('/'), Storage.PATH_FORMAT_VERSION, ]
-        #path_segments.extend([self.partition(path), path.lstrip('/'), ])
-        path_segments.extend([path.lstrip('/'), ])
+        path_segments = \
+            [self.context.config.get('CLOUD_STORAGE_ROOT_PATH',
+             'thumbor/').rstrip('/'), Storage.PATH_FORMAT_VERSION]
 
-        normalized_path = os.path.join(*path_segments).replace('http://', '')
-        logger.debug("[normalize_path] path=%s, normalized_path=%s" % (path, normalized_path))
+    # path_segments.extend([self.partition(path), path.lstrip('/'), ])
+
+        path_segments.extend([path.lstrip('/')])
+
+        normalized_path = os.path.join(*path_segments).replace('http://'
+                , '')
+        logger.debug('[normalize_path] path=%s, normalized_path=%s'
+                     % (path, normalized_path))
         return normalized_path
+
+    def _get_bucket(self):
+        parent = Storage
+        if not parent.bucket:
+            bucket_id = \
+                self.context.config.get('CLOUD_STORAGE_BUCKET_ID')
+            project_id = \
+                self.context.config.get('CLOUD_STORAGE_PROJECT_ID')
+
+            logger.debug('[GoogleCloudStorage] getting bucket %s'
+                         % bucket_id)
+            client = storage.Client(project_id)
+            parent.bucket = client.get_bucket(bucket_id)
+
+        return parent.bucket
